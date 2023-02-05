@@ -8,9 +8,6 @@
 #define SYSBYTES 4
 #endif
 
-// Align a size of memory to 32 or 64 bits for a faster memory access
-size_t align(size_t size);
-
 // Alloc Memory
 void * alloc(size_t size);
 
