@@ -14,6 +14,10 @@ typedef struct Header{
 
 } Header;
 
+// Linked list of free blocks
+Header * first;
+Header * last;
+
 // We will use last digit of a size in binary to store if its used or not
 // Ex.
 // 8 bytes = 0000 1000
@@ -41,7 +45,7 @@ typedef struct Header{
 //            0001 0000 = 16 bytes
 //
 // As you see this operation returns the original size so we can use this to check the size even if its used or not
-inline void setUsed(Header * block, int used) {
+void setUsed(Header * block, int used) {
     if (used) {
         block->header |= 1;
     }
@@ -72,7 +76,7 @@ size_t getSize(Header * block) {
 //       ‾‾‾‾‾‾‾‾‾‾‾
 //        0000 0000 = Not used
 //
-inline int isUsed(Header * block) {
+int isUsed(Header * block) {
     return block->header & 1;
 }
 
@@ -110,5 +114,15 @@ Header * request_memory(size_t size) {
 }
 
 void * alloc(size_t size) {
+    // There is free blocks?
+    if (first != NULL) {
+        // Seach throug linked list
+    }
+
+    Header * block = request_memory(size);
+    block->header = size;
+    setUsed(block, 1);
+
+    return block + sizeof(Header);
 }
 
