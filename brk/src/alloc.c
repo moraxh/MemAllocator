@@ -73,12 +73,17 @@ size_t getSize(Header * block) {
 //        0000 0000 = Not used
 //
 inline int isUsed(Header * block) {
-    return block->header & 1L;
+    return block->header & 1;
 }
-
 
 // ----------------------------------------------------------------
 // Align a x size to 64 bits or 32 bits
+// Ex.
+// 64 bit system {
+//     5 bytes  = 8 bytes
+//     20 bytes = 24 bytes
+//     39 btes  = 40 bytes
+// }
 size_t align(size_t size) {
 
     if((size % SYSBYTES) != 0) {
@@ -91,13 +96,12 @@ size_t align(size_t size) {
 
 // ----------------------------------------------------------------
 // Allocs a space of given memory
-
 Header * request_memory(size_t size) {
     // Get current memory direction
     Header * addr = (Header *)sbrk(0);
 
     // Check if memory can be allocated
-    // NULL is Out of Memory
+    // if returns NULL is OOM(Out of Memory)
     if(sbrk(align(size + sizeof(Header))) == (void *) - 1) {
         return NULL;
     }
