@@ -1,6 +1,7 @@
 #include "alloc.h"
 
-// TODO Merge free blocks
+// TODO
+// Merge free blocks
 // Split free blocks
 // Test recent changes
 
@@ -9,13 +10,19 @@
 // blocks that are between allocated blocks
 // for this we need to use a header to store
 // if its used and its size
+//
+// Allocated Block
 // +-------------------------------------+
 // |   Header   |          Data          |
 // +-------------------------------------+
-typedef struct Header{
-    // It'll store codified size and used state
-    size_t header;
+//
+// Deallocated Block
+// +-------------------------------------+
+// |   Header   |      (FreeList *)      |
+// +-------------------------------------+
 
+typedef struct Header {
+    size_t info; // Store size and used state
 } Header;
 
 typedef struct FreeList {
@@ -25,11 +32,11 @@ typedef struct FreeList {
 // Linked list of free blocks
 Header * head;
 
-// Binary operations
-void setUsed(Header * block, int used);
+// ------------------ FUNCTIONS --------------------------
+// Header operations
+void setUsed(Header * block, int isused);
 size_t getSize(Header * block);
 int isUsed(Header * block);
-
 size_t align(size_t size);
 
 // Allocator
@@ -39,10 +46,13 @@ void * alloc(size_t size);
 // Deallocator
 Header * bestFitSearch(size_t size);
 FreeList * getNodeFreeList(Header * block);
-void appendToFreeList(Header * block, FreeList * b_node);
+void appendToFreeList(Header * block, FreeList * block_freenode);
 void removeFromFreeList(Header * block);
 void dealloc(void * addr);
+// -------------------------------------------------------
 
+
+// ------------------------- HEADER OPERATIONS -------------------------------
 // We will use last digit of a size in binary to store if its used or not
 // Ex.
 // 8 bytes = 0000 1000
@@ -70,17 +80,17 @@ void dealloc(void * addr);
 //            0001 0000 = 16 bytes
 //
 // As you see this operation returns the original size so we can use this to check the size even if its used or not
-void setUsed(Header * block, int used) {
-    if (used) {
-        block->header |= 1;
+void setUsed(Header * block, int isused) {
+    if (isused) {
+        block->info |= 1;
     }
     else {
-        block->header &= ~1;
+        block->info &= ~1;
     }
 }
 
 size_t getSize(Header * block) {
-    return block->header & ~1;
+    return block->info & ~1;
 }
 
 // To check if it used or not we'll use & bitwise operator
@@ -102,17 +112,13 @@ size_t getSize(Header * block) {
 //        0000 0000 = Not used
 //
 int isUsed(Header * block) {
-    return block->header & 1;
+    return block->info & 1;
 }
 
-// ----------------------------------------------------------------
 // Align a x size to 64 bits or 32 bits
 // Ex.
-// 64 bit system {
 //     5 bytes  = 8 bytes
 //     20 bytes = 24 bytes
-//     39 btes  = 40 bytes
-// }
 size_t align(size_t size) {
 
     if((size % SYSBYTES) != 0) {
@@ -122,15 +128,13 @@ size_t align(size_t size) {
         return size;
     }
 }
+// ---------------------------------------------------------------------------
 
-
-// ----------------------------------------------------------------
-// Allocs a space of given memory
+// ----------------------------- ALLOCATOR -----------------------------------
 Header * requestMemory(size_t size) {
     // Get current memory direction
     Header * addr = (Header *)sbrk(0);
 
-    // Check if memory can be allocated
     // if returns NULL is OOM(Out of Memory)
     if(sbrk(align(size + sizeof(Header))) == (void *) - 1) {
         return NULL;
@@ -139,87 +143,96 @@ Header * requestMemory(size_t size) {
     return addr;
 }
 
+Header * bestFitSearch(size_t size) {
+    if (head == NULL) { return NULL; }
+
+    Header * actual_header = head;
+    // Try to search a block of the exact size
+    do {
+        if(size == getSize(actual_header)) {
+            return actual_header;
+        }
+
+        actual_header = (Header *)getNodeFreeList(actual_header)->next;
+    }
+    while(actual_header != NULL);
+
+    // Try to search a bigger block
+    actual_header = head;
+    do {
+        if(size < getSize(actual_header)) {
+            return actual_header;
+        }
+
+        actual_header = (Header *)getNodeFreeList(actual_header)->next;
+    }
+    while(actual_header != NULL);
+
+    return NULL; // NULL means not found
+}
+
 void * alloc(size_t size) {
-    // There is free blocks?
+    // There is free blocks in linked free list?
     if (head != NULL) {
-        Header * block = bestFitSearch(size);
-        if (block != NULL) {
-            return block + sizeof(Header);
+        Header * free_block = bestFitSearch(size);
+        if (free_block != NULL) {
+            return free_block + sizeof(Header);
         }
     }
 
     Header * block = requestMemory(size);
-    block->header = align(size);
+    if (block == NULL) { return NULL; }
+
+    block->info = align(size);
     setUsed(block, 1);
 
     return ((void *)block + sizeof(Header));
 }
+// ---------------------------------------------------------------------
 
 
-// Deallocates a block from a given pointer
-// -------------------------------------------------------------------------------
-
-void printFreeList(Header * head) {
-    if (head == NULL) {
-        printf("Lista Vacia\n");
-        return;
-    }
-
-    FreeList * s_node;
-    do {
-        s_node = getNodeFreeList(head);
-
-        printf("Head: %p\n", head);
-        printf("FreeList: %p\n", s_node);
-        printf("Next: %p\n\n", s_node->next);
-        head = s_node->next;
-    }
-    while(s_node->next != NULL);
-    printf("------------------------------------\n");
-}
-
+// ---------------------------- DEALLOCATOR ----------------------------
 FreeList * getNodeFreeList(Header * block) {
     return (FreeList *)((void *)block + sizeof(Header));
 }
 
-// Append to the sorted free list
-void appendToFreeList(Header * block, FreeList * b_node) {
-    Header * s_header = head;
-    FreeList * s_node = NULL;
+void appendToFreeList(Header * block, FreeList * block_freenode) {
+    Header * actual_header = head;
+    FreeList * actual_freenode = NULL;
 
     do {
-        s_node = getNodeFreeList(s_header);
+        actual_freenode = getNodeFreeList(actual_header);
 
         // Is block smaller than the first element?
-        if (((void *)block < (void *)s_header) && s_header == head) {
-            b_node->next = s_header;
+        if (((void *)block < (void *)actual_header) && actual_header == head) {
+            block_freenode->next = actual_header;
             head = block;
             return;
         }
 
         // Is block direction bigger than the actual?
-        if ((void *)block > (void *)s_header) {
+        if ((void *)block > (void *)actual_header) {
 
             // Is the actual node the last one?
-            if(s_node->next == NULL) {
+            if(actual_freenode->next == NULL) {
                 break;
             }
 
             // If direction is smaller than the next one
-            if((void *)block < (void *)s_node->next) {
+            if((void *)block < (void *)actual_freenode->next) {
                 // Insert between blocks
-                b_node->next = s_node->next;
-                s_node->next = block;
+                block_freenode->next = actual_freenode->next;
+                actual_freenode->next = block;
                 return;
             }
         }
 
-        s_header = s_node->next;
+        actual_header = actual_freenode->next;
     }
-    while(s_node->next != NULL); // This will never break the loop
+    while(actual_freenode->next != NULL); // This will never break the loop
 
     // Insert block to the tail
-    s_node->next = block;
+    actual_freenode->next = block;
 }
 
 // Remove a block from free list
@@ -230,16 +243,16 @@ void removeFromFreeList(Header * block) {
         return;
     }
 
-    Header * s_node = head;
+    Header * actual_node = head;
     Header * prev_block = NULL;
 
     do {
-        if(getNodeFreeList(s_node)->next == block) {
-            prev_block = s_node;
+        if(getNodeFreeList(actual_node)->next == block) {
+            prev_block = actual_node;
         }
-        s_node = getNodeFreeList(s_node)->next;
+        actual_node = getNodeFreeList(actual_node)->next;
     }
-    while(s_node != NULL);
+    while(actual_node != NULL);
 
     if (prev_block == NULL) { return; }
 
@@ -260,35 +273,6 @@ void removeFromFreeList(Header * block) {
     getNodeFreeList(prev_block)->next = getNodeFreeList(getNodeFreeList(prev_block)->next)->next;
 }
 
-Header * bestFitSearch(size_t size) {
-    if (head == NULL) { return NULL; }
-
-    Header * s_header = head;
-
-    // Try to search a block of the exact size
-    do {
-        if(size == getSize(s_header)) {
-            return s_header;
-        }
-
-        s_header = (Header *)getNodeFreeList(s_header)->next;
-    }
-    while(s_header != NULL);
-
-    // Try to search a bigger block
-    s_header = head;
-
-    do {
-        if(size < getSize(s_header)) {
-            return s_header;
-        }
-
-        s_header = (Header *)getNodeFreeList(s_header)->next;
-    }
-    while(s_header != NULL);
-
-    return NULL; // NULL means not found
-}
 
 // To "delete" a reserved memory space we are gonna set
 // it state to unused, and add it to a free linked list,
@@ -306,8 +290,8 @@ void dealloc(void * addr) {
     // Set block parameters (unused) and create a node of the
     // free linked list
     Header * block = (Header *)(addr - sizeof(Header));
-    FreeList * b_node = getNodeFreeList(block);
-    b_node->next = NULL;
+    FreeList * block_freenode = getNodeFreeList(block);
+    block_freenode->next = NULL;
     setUsed(block, 0);
 
     // If FreeList is empty
@@ -316,5 +300,5 @@ void dealloc(void * addr) {
         return;
     }
 
-    appendToFreeList(block, b_node);
+    appendToFreeList(block, block_freenode);
 }
