@@ -1,10 +1,5 @@
 #include "alloc.h"
 
-// TODO
-// Merge free blocks
-// Split free blocks
-// Test recent changes
-
 // Since sbrk() can only increase or decrease
 // its position we need a form to deallocate
 // blocks that are between allocated blocks
@@ -22,7 +17,7 @@
 // +-------------------------------------+
 
 typedef struct Header {
-    size_t info; // Store size and used state
+    size_t size;
 } Header;
 
 typedef struct FreeList {
@@ -33,112 +28,40 @@ typedef struct FreeList {
 Header * head;
 
 // ------------------ FUNCTIONS --------------------------
-// Header operations
-void setUsed(Header * block, int isused);
-size_t getSize(Header * block);
-int isUsed(Header * block);
+// Align memory to 32 or 64 bits
 size_t align(size_t size);
 
 // Allocator
 Header * requestMemory(size_t size);
+Header * bestFitSearch(size_t size);
 void * alloc(size_t size);
 
 // Deallocator
-Header * bestFitSearch(size_t size);
 FreeList * getNodeFreeList(Header * block);
-void appendToFreeList(Header * block, FreeList * block_freenode);
+void appendToFreeList(Header * block);
 void removeFromFreeList(Header * block);
 void dealloc(void * addr);
 // -------------------------------------------------------
 
-
-// ------------------------- HEADER OPERATIONS -------------------------------
-// We will use last digit of a size in binary to store if its used or not
-// Ex.
-// 8 bytes = 0000 1000
-//                   ^
-//                   This 0 represents if the block is used or not
-//
-// For this the program use bitwise operators to change that digit
-// If its used
-// 1 = Used         1 = 0000 0001
-// ~1 = Free       ~1 = 1111 1110
-//
-// Ex. Imagine we will store 16 bytes
-// To set the state of used use | bitwise operator
-//
-// 16 bytes | 1 byte
-// 16 bytes = 0001 0000
-// 1 byte   = 0000 0001
-//           ‾‾‾‾‾‾‾‾‾‾‾
-//            0001 0001
-//
-// To change it state to free we use & bitwise operator with ~1
-// 16B | 1B = 0001 0001
-// ~1       = 1111 1110
-//           ‾‾‾‾‾‾‾‾‾‾‾
-//            0001 0000 = 16 bytes
-//
-// As you see this operation returns the original size so we can use this to check the size even if its used or not
-void setUsed(Header * block, int isused) {
-    if (isused) {
-        block->info |= 1;
-    }
-    else {
-        block->info &= ~1;
-    }
-}
-
-size_t getSize(Header * block) {
-    return block->info & ~1;
-}
-
-// To check if it used or not we'll use & bitwise operator
-// (From the above example)
-//
-// Used = 0001 0001
-// Free = 0001 0000
-//
-// var & 1
-// Used = 0001 0001
-// 1    = 0000 0001
-//       ‾‾‾‾‾‾‾‾‾‾‾
-//        0000 0001 = 1 = Its used
-//
-// var & 1
-// Free = 0001 0000
-// 1    = 0000 0001
-//       ‾‾‾‾‾‾‾‾‾‾‾
-//        0000 0000 = Not used
-//
-int isUsed(Header * block) {
-    return block->info & 1;
-}
-
-// Align a x size to 64 bits or 32 bits
+// Align an "x" size to 64 bits or 32 bits
 // Ex.
 //     5 bytes  = 8 bytes
 //     20 bytes = 24 bytes
-size_t align(size_t size) {
 
-    if((size % SYSBYTES) != 0) {
-        return ((size / SYSBYTES) + 1) * SYSBYTES;
-    }
-    else {
-        return size;
-    }
+size_t align(size_t size) {
+    if( (size % SYSBYTES) != 0 ) { return ((size / SYSBYTES) + 1) * SYSBYTES; }
+    return size;
 }
-// ---------------------------------------------------------------------------
 
 // ----------------------------- ALLOCATOR -----------------------------------
+
+// Try to move the brk if it failed returns null
 Header * requestMemory(size_t size) {
-    // Get current memory direction
+    // Get current brk
     Header * addr = (Header *)sbrk(0);
 
-    // if returns NULL is OOM(Out of Memory)
-    if(sbrk(align(size + sizeof(Header))) == (void *) - 1) {
-        return NULL;
-    }
+    // If returns NULL is OOM(Out of Memory)
+    if( sbrk(size) == (void *) - 1 ) { return NULL; }
 
     return addr;
 }
@@ -146,45 +69,52 @@ Header * requestMemory(size_t size) {
 Header * bestFitSearch(size_t size) {
     if (head == NULL) { return NULL; }
 
-    Header * actual_header = head;
+    Header * block = head;
     // Try to search a block of the exact size
     do {
-        if(size == getSize(actual_header)) {
-            return actual_header;
+        if(size == block->size) {
+            return block;
         }
 
-        actual_header = (Header *)getNodeFreeList(actual_header)->next;
+        block = (Header *)getNodeFreeList(block)->next;
     }
-    while(actual_header != NULL);
+    while(block != NULL);
 
     // Try to search a bigger block
-    actual_header = head;
+    block = head;
     do {
-        if(size < getSize(actual_header)) {
-            return actual_header;
+        if(size < block->size) {
+            return block;
         }
 
-        actual_header = (Header *)getNodeFreeList(actual_header)->next;
+        block = (Header *)getNodeFreeList(block)->next;
     }
-    while(actual_header != NULL);
+    while(block != NULL);
 
     return NULL; // NULL means not found
 }
 
 void * alloc(size_t size) {
+
     // There is free blocks in linked free list?
     if (head != NULL) {
         Header * free_block = bestFitSearch(size);
         if (free_block != NULL) {
-            return free_block + sizeof(Header);
+            printf("-- Allocating %ld bytes, in %p\n", size, (void *)free_block + sizeof(Header));
+            return (void *)free_block + sizeof(Header);
         }
     }
 
-    Header * block = requestMemory(size);
+    // If not create one
+        // Request memory block
+    Header * block = requestMemory( align(size + sizeof(Header)) );
     if (block == NULL) { return NULL; }
 
-    block->info = align(size);
-    setUsed(block, 1);
+        // Set size
+    block->size = align(size);
+
+    // Print info
+    printf("-- Allocating %ld bytes, in %p\n", size, (void *)block + sizeof(Header));
 
     return ((void *)block + sizeof(Header));
 }
@@ -196,8 +126,9 @@ FreeList * getNodeFreeList(Header * block) {
     return (FreeList *)((void *)block + sizeof(Header));
 }
 
-void appendToFreeList(Header * block, FreeList * block_freenode) {
+void appendToFreeList(Header * block) {
     Header * actual_header = head;
+    FreeList * block_freenode = getNodeFreeList(block);
     FreeList * actual_freenode = NULL;
 
     do {
@@ -246,6 +177,7 @@ void removeFromFreeList(Header * block) {
     Header * actual_node = head;
     Header * prev_block = NULL;
 
+    // Search the block
     do {
         if(getNodeFreeList(actual_node)->next == block) {
             prev_block = actual_node;
@@ -265,18 +197,18 @@ void removeFromFreeList(Header * block) {
     // Link prev block to the next of the current block
     //
     //
-    //                                 +--------------------------------+ +---------------
-    //                                 |                                | |              |
-    // +-------------+-----------------|--+    +--------+---------------v-|--+    +------v------+--------------------+
-    // |  Prev Block | (FreeList *)->next |    |  Block | (FreeList *)->next |    |  Next Block | (FreeList *)->next |
-    // +-------------+--------------------+    +--------+--------------------+    +-------------+--------------------+
+    //                                 +------------------------------+ +-------------+
+    //                                 |                              | |             |
+    // +------------+------------------|-+    +-------+---------------v-|--+    +-----v------+--------------------+
+    // | Prev Block | (FreeList *)->next |    | Block | (FreeList *)->next |    | Next Block | (FreeList *)->next |
+    // +------------+--------------------+    +-------+--------------------+    +------------+--------------------+
+    //
     getNodeFreeList(prev_block)->next = getNodeFreeList(getNodeFreeList(prev_block)->next)->next;
 }
 
-
-// To "delete" a reserved memory space we are gonna set
-// it state to unused, and add it to a free linked list,
-// this list will be stored inside the data block
+// To "delete" a reserved memory space we are add
+// it to a free linked list, this list will be
+// stored inside the data block.
 //
 //  (Header *)first
 //               |
@@ -286,13 +218,10 @@ void removeFromFreeList(Header * block) {
 //                 | Header | (FreeList *)Next |   | Header | (FreeList *)Next |
 //                 +--------+------------------+   +--------+------------------+
 //
+
 void dealloc(void * addr) {
-    // Set block parameters (unused) and create a node of the
-    // free linked list
     Header * block = (Header *)(addr - sizeof(Header));
-    FreeList * block_freenode = getNodeFreeList(block);
-    block_freenode->next = NULL;
-    setUsed(block, 0);
+    getNodeFreeList(block)->next = NULL;
 
     // If FreeList is empty
     if (head == NULL) {
@@ -300,5 +229,5 @@ void dealloc(void * addr) {
         return;
     }
 
-    appendToFreeList(block, block_freenode);
+    appendToFreeList(block);
 }
