@@ -1,7 +1,7 @@
 #include "alloc.h"
 
-// Since sbrk() can only increase or decrease
-// its position we need a form to deallocate
+// sbrk() can only increase or decrease its
+// position we need a form to deallocate
 // blocks that are between allocated blocks
 // for this we need to use a header to store
 // if its used and its size
@@ -37,10 +37,15 @@ Header * bestFitSearch(size_t size);
 void * alloc(size_t size);
 
 // Deallocator
+void dealloc(void * addr);
+
+// FreeList
 FreeList * getNodeFreeList(Header * block);
+void printFreeList();
+void mergeFreeBlocks();
+void splitFreeBlocks();
 void appendToFreeList(Header * block);
 void removeFromFreeList(Header * block);
-void dealloc(void * addr);
 // -------------------------------------------------------
 
 // Align an "x" size to 64 bits or 32 bits
@@ -73,6 +78,7 @@ Header * bestFitSearch(size_t size) {
     // Try to search a block of the exact size
     do {
         if(size == block->size) {
+            removeFromFreeList(block);
             return block;
         }
 
@@ -84,6 +90,7 @@ Header * bestFitSearch(size_t size) {
     block = head;
     do {
         if(size < block->size) {
+            removeFromFreeList(block);
             return block;
         }
 
@@ -95,12 +102,11 @@ Header * bestFitSearch(size_t size) {
 }
 
 void * alloc(size_t size) {
-
     // There is free blocks in linked free list?
     if (head != NULL) {
         Header * free_block = bestFitSearch(size);
         if (free_block != NULL) {
-            printf("-- Allocating %ld bytes, in %p\n", size, (void *)free_block + sizeof(Header));
+            printf("-- Allocating %ld bytes, in %p, Head: %p\n", size, (void *)free_block + sizeof(Header), free_block);
             return (void *)free_block + sizeof(Header);
         }
     }
@@ -114,16 +120,40 @@ void * alloc(size_t size) {
     block->size = align(size);
 
     // Print info
-    printf("-- Allocating %ld bytes, in %p\n", size, (void *)block + sizeof(Header));
+    printf("-- Allocating %ld bytes, in %p, Head: %p\n", size, (void *)block + sizeof(Header), block);
 
     return ((void *)block + sizeof(Header));
 }
 // ---------------------------------------------------------------------
 
-
-// ---------------------------- DEALLOCATOR ----------------------------
+// ----------------------------- FREELIST ------------------------------
 FreeList * getNodeFreeList(Header * block) {
     return (FreeList *)((void *)block + sizeof(Header));
+}
+
+void printFreeList() {
+    if (head == NULL) { return; }
+    Header * block = head;
+
+    printf("\n---FREELIST---\n");
+    do {
+        printf("Addr: %p, Size: %ld, Next: %p\n", block, block->size, getNodeFreeList(block)->next);
+    } while((block = getNodeFreeList(block)->next) != NULL);
+    printf("--------------\n");
+}
+
+void mergeFreeBlocks() {
+    Header * block = head;
+    Header * next = NULL;
+
+    do {
+        // If next block is next to actual block
+        while ( ((void *)block + sizeof(Header) + block->size) == getNodeFreeList(block)->next ) {
+            // Update size
+            block->size = block->size + getNodeFreeList(block)->next->size + sizeof(Header);
+            removeFromFreeList(getNodeFreeList(block)->next);
+        }
+    } while((block = getNodeFreeList(block)->next) != NULL);
 }
 
 void appendToFreeList(Header * block) {
@@ -164,6 +194,8 @@ void appendToFreeList(Header * block) {
 
     // Insert block to the tail
     actual_freenode->next = block;
+
+    mergeFreeBlocks();
 }
 
 // Remove a block from free list
@@ -205,6 +237,7 @@ void removeFromFreeList(Header * block) {
     //
     getNodeFreeList(prev_block)->next = getNodeFreeList(getNodeFreeList(prev_block)->next)->next;
 }
+// ---------------------------------------------------------------------
 
 // To "delete" a reserved memory space we are add
 // it to a free linked list, this list will be
@@ -219,8 +252,10 @@ void removeFromFreeList(Header * block) {
 //                 +--------+------------------+   +--------+------------------+
 //
 
+// ---------------------------- DEALLOCATOR ----------------------------
 void dealloc(void * addr) {
     Header * block = (Header *)(addr - sizeof(Header));
+    printf( "Deallocating %p, Size = %ld\n", block, block->size );
     getNodeFreeList(block)->next = NULL;
 
     // If FreeList is empty
@@ -231,3 +266,4 @@ void dealloc(void * addr) {
 
     appendToFreeList(block);
 }
+// ---------------------------------------------------------------------
