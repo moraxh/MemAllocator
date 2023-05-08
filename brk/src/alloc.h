@@ -13,3 +13,6 @@ void * alloc(size_t size);
 
 // Dealloc Memory
 void dealloc(void * addr);
+
+//
+void printFreeList();
