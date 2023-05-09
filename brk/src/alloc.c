@@ -43,7 +43,7 @@ void dealloc(void * addr);
 FreeList * getNodeFreeList(Header * block);
 void printFreeList();
 void mergeFreeBlocks();
-void splitFreeBlocks();
+void * splitFreeBlocks(Header * block, size_t size_required);
 void appendToFreeList(Header * block);
 void removeFromFreeList(Header * block);
 // -------------------------------------------------------
@@ -89,8 +89,11 @@ Header * bestFitSearch(size_t size) {
     // Try to search a bigger block
     block = head;
     do {
-        if(size < block->size) {
-            removeFromFreeList(block);
+        if( block->size > size) {
+            // Can split the block?
+            if (splitFreeBlocks(block, size) == NULL) {
+                removeFromFreeList(block);
+            }
             return block;
         }
 
@@ -132,10 +135,13 @@ FreeList * getNodeFreeList(Header * block) {
 }
 
 void printFreeList() {
-    if (head == NULL) { return; }
+    if (head == NULL) {
+        printf("-- FreeList Empty --");
+        return;
+    }
     Header * block = head;
 
-    printf("\n---FREELIST---\n");
+    printf("---FREELIST---\n");
     do {
         printf("Addr: %p, Size: %ld, Next: %p\n", block, block->size, getNodeFreeList(block)->next);
     } while((block = getNodeFreeList(block)->next) != NULL);
@@ -154,6 +160,25 @@ void mergeFreeBlocks() {
             removeFromFreeList(getNodeFreeList(block)->next);
         }
     } while((block = getNodeFreeList(block)->next) != NULL);
+}
+
+void * splitFreeBlocks(Header * block, size_t size_required) {
+    // If remaining space is less than minimum size block(18 bytes)
+    size_t minimum_size = align( sizeof(Header) + sizeof(char) );
+    if( block->size - size_required < minimum_size ) { return NULL; }
+
+    Header * new = (void *)block + sizeof(Header) + size_required;
+    // Update block size
+    new->size = block->size - size_required;
+    // Add FreeList *
+    getNodeFreeList(new)->next = NULL;
+    block->size = size_required;
+
+    removeFromFreeList(block);
+    if (head == NULL) { head = new; }
+    else { appendToFreeList(new); }
+
+    return new;
 }
 
 void appendToFreeList(Header * block) {
@@ -253,6 +278,7 @@ void removeFromFreeList(Header * block) {
 //
 
 // ---------------------------- DEALLOCATOR ----------------------------
+
 void dealloc(void * addr) {
     Header * block = (Header *)(addr - sizeof(Header));
     printf( "Deallocating %p, Size = %ld\n", block, block->size );
